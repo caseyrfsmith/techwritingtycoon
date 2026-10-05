@@ -1,863 +1,828 @@
-import React, { useState, useEffect } from 'react';
-import { Play, Pause, DollarSign, Users, TrendingUp, TrendingDown, AlertCircle, CheckCircle, Clock, Info, BookOpen, Zap, Award, Target } from 'lucide-react';
-import { scenarios, achievements, touchpointData, monetizationData, teamRoles, metricTooltips } from './gameData';
-import { chaosEvents, opportunityEvents } from './gameEvents';
+import { createElement, useEffect, useState } from "react";
+import {
+  ArrowRight,
+  BookOpen,
+  Users,
+  Wallet,
+  Award,
+  Play,
+  Pause,
+  Check,
+  ChevronRight,
+  Leaf,
+  Building2,
+  Rocket,
+  Skull,
+  X,
+  SkipForward,
+  Clock,
+  Bot,
+} from "lucide-react";
+import {
+  scenarios,
+  weeklyFocuses,
+  touchpointData,
+  achievements,
+  timelines,
+} from "./gameData.js";
+import {
+  createGame,
+  advanceWeek,
+  weeklyCosts,
+  projectCapacity,
+  purchase,
+  resolveEvent,
+  milestones,
+  agentReadiness,
+  repairProjects,
+  scenarioPlan,
+} from "./gameEngine.js";
+import {
+  ContentLibrary,
+  TeamPanel,
+  RevenuePanel,
+  AchievementsPanel,
+  EventDialog,
+  AgentPanel,
+  SupportPanel,
+  LaunchEssentials,
+} from "./GamePanels.jsx";
+import "./App.css";
 
-const DocsResourcesTycoon = () => {
-  const [gameState, setGameState] = useState({
-    week: 1,
-    isPaused: true,
-    budget: 500000,
-    revenue: 0,
-    totalRevenue: 0,
-    readerSat: 50,
-    activeReaders: 0,
-    churn: 15,
-    premiumSubscribers: 0,
-    enterpriseClients: 0,
-    certifications: 0,
-    adImpressions: 0,
-    team: {
-      techWriters: 2,
-      contentDesigners: 1,
-      videoProducers: 0,
-      engineers: 1,
-      educators: 0
-    },
-    touchpoints: {
-      docsHome: { invested: true },
-      searchSEO: { invested: false },
-      socialContent: { invested: false },
-      webinars: { invested: false },
-      docsLanding: { invested: true },
-      comparison: { invested: false },
-      useCaseLibrary: { invested: false },
-      productTours: { invested: true },
-      quickStart: { invested: true },
-      codeExamples: { invested: false },
-      videoTutorials: { invested: false },
-      interactiveDemo: { invested: false },
-      apiReference: { invested: true },
-      troubleshooting: { invested: false },
-      communityForum: { invested: false },
-      advancedGuides: { invested: false },
-      bestPractices: { invested: false },
-      certification: { invested: false },
-      contributorProgram: { invested: false }
-    },
-    monetization: {
-      freemium: { enabled: true, cost: 0 },
-      premiumContent: { enabled: false, cost: 25000 },
-      enterpriseSupport: { enabled: false, cost: 50000 },
-      advertising: { enabled: false, cost: 5000 },
-      certificationFees: { enabled: false, cost: 15000 },
-      sponsoredContent: { enabled: false, cost: 10000 }
-    },
-    pendingEvent: null,
-    eventHistory: [],
-    achievements: [],
-    goalReaders: 1000,
-    goalWeeks: 26,
-    goalReaderSat: 70,
-    goalRevenue: 100000,
-    scenario: 'startup'
-  });
-
-  const [showEvent, setShowEvent] = useState(false);
-  const [message, setMessage] = useState(null);
-  const [gameSpeed, setGameSpeed] = useState(4000);
-  const [hoveredTooltip, setHoveredTooltip] = useState(null);
-  const [showMonetization, setShowMonetization] = useState(false);
-  const [showAchievements, setShowAchievements] = useState(false);
-  const [showScenarios, setShowScenarios] = useState(true);
-
-  const formatCurrency = (amount) => {
-    if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
-    if (amount >= 1000) return `$${(amount / 1000).toFixed(0)}k`;
-    return `$${amount}`;
-  };
-
-  const calculateWeeklyCosts = (state) => {
-    let costs = 0;
-    teamRoles.forEach(role => {
-      costs += state.team[role.key] * role.salary;
-    });
-    Object.keys(state.touchpoints).forEach(key => {
-      if (state.touchpoints[key].invested && touchpointData[key]) {
-        costs += touchpointData[key].maintenance * 100;
-      }
-    });
-    return costs;
-  };
-
-  const hireTeamMember = (roleKey) => {
-    const role = teamRoles.find(r => r.key === roleKey);
-    if (gameState.budget >= role.cost) {
-      setGameState(prev => ({
-        ...prev,
-        budget: prev.budget - role.cost,
-        team: { ...prev.team, [roleKey]: prev.team[roleKey] + 1 }
-      }));
-      setMessage({ type: 'success', text: `Hired a ${role.label.toLowerCase()}!` });
-    } else {
-      setMessage({ type: 'error', text: 'Not enough budget!' });
-    }
-  };
-
-  const investInTouchpoint = (key) => {
-    const data = touchpointData[key];
-    if (gameState.touchpoints[key].invested) {
-      setMessage({ type: 'info', text: `${data.name} is already active!` });
-      return;
-    }
-    
-    // Check staff requirements
-    if (data.requires) {
-      const missingStaff = [];
-      Object.keys(data.requires).forEach(role => {
-        if (gameState.team[role] < data.requires[role]) {
-          const roleLabel = teamRoles.find(r => r.key === role)?.label || role;
-          missingStaff.push(`${data.requires[role]} ${roleLabel}`);
-        }
-      });
-      
-      if (missingStaff.length > 0) {
-        setMessage({ type: 'error', text: `Not enough staff! Need: ${missingStaff.join(', ')}` });
-        return;
-      }
-    }
-    
-    if (gameState.budget >= data.cost) {
-      setGameState(prev => ({
-        ...prev,
-        budget: prev.budget - data.cost,
-        touchpoints: { ...prev.touchpoints, [key]: { invested: true } }
-      }));
-      setMessage({ type: 'success', text: `Created ${data.name}!` });
-    } else {
-      setMessage({ type: 'error', text: 'Not enough budget!' });
-    }
-  };
-
-  const enableMonetization = (key) => {
-    const data = monetizationData[key];
-    if (key === 'freemium') {
-      setMessage({ type: 'info', text: 'Freemium is always enabled' });
-      return;
-    }
-    if (gameState.monetization[key].enabled) {
-      setMessage({ type: 'info', text: 'Already enabled!' });
-      return;
-    }
-    if (gameState.budget >= data.cost) {
-      setGameState(prev => ({
-        ...prev,
-        budget: prev.budget - data.cost,
-        monetization: { ...prev.monetization, [key]: { ...prev.monetization[key], enabled: true } }
-      }));
-      setMessage({ type: 'success', text: `Enabled ${data.name}!` });
-    } else {
-      setMessage({ type: 'error', text: 'Not enough budget!' });
-    }
-  };
-
-  const handleEventChoice = (option) => {
-    setGameState(prev => {
-      const newState = { ...prev };
-      if (option.effect.budget) newState.budget += option.effect.budget;
-      if (option.effect.revenue) newState.totalRevenue += option.effect.revenue;
-      if (option.effect.readerSat) newState.readerSat = Math.max(0, Math.min(100, newState.readerSat + option.effect.readerSat));
-      if (option.effect.readers) newState.activeReaders += option.effect.readers;
-      if (option.effect.enterpriseClients) newState.enterpriseClients += option.effect.enterpriseClients;
-      if (option.effect.team) {
-        Object.keys(option.effect.team).forEach(role => {
-          newState.team[role] = Math.max(0, newState.team[role] + option.effect.team[role]);
-        });
-      }
+const money = (value) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+const signed = (value) => `${value > 0 ? "+" : ""}${value}`;
+const clean = (name) => name.replace(/^[^A-Za-z]+/, "");
+const scenarioIcons = [Rocket, Building2, Leaf, Skull];
+const tabs = [
+  { key: "content", label: "Content library", icon: BookOpen },
+  { key: "agents", label: "Agent experience", icon: Bot },
+  { key: "team", label: "Your team", icon: Users },
+  { key: "revenue", label: "Revenue streams", icon: Wallet },
+  { key: "achievements", label: "Achievements", icon: Award },
+];
+const saveKey = "tech-writing-tycoon-v2";
+function loadGame() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(saveKey));
+    if (
+      saved?.version === 2 &&
+      scenarios[saved.game?.scenario] &&
+      Array.isArray(saved.game.projects) &&
+      saved.game.missionBonus
+    )
       return {
-        ...newState,
-        pendingEvent: null,
-        eventHistory: [...prev.eventHistory, prev.pendingEvent.id]
+        game: {
+          ...createGame(saved.game.scenario),
+          ...saved.game,
+          touchpoints: {
+            ...createGame(saved.game.scenario).touchpoints,
+            ...saved.game.touchpoints,
+          },
+          elapsedDays:
+            saved.game.elapsedDays ??
+            Math.min(saved.game.week * 7, saved.game.goalDays || 90),
+          goalDays: saved.game.goalDays || 90,
+          goalWeeks: Math.ceil((saved.game.goalDays || 90) / 7),
+          isPaused: true,
+        },
+        saved: true,
       };
-    });
-    setShowEvent(false);
-    setMessage({ type: 'success', text: 'Event resolved!' });
-  };
-
-  const startScenario = (scenarioKey) => {
-    const scenario = scenarios[scenarioKey];
-    setGameState({
-      ...gameState,
-      scenario: scenarioKey,
-      budget: scenario.budget,
-      team: { ...scenario.team },
-      goalReaders: scenario.goals.readers,
-      goalRevenue: scenario.goals.revenue,
-      goalReaderSat: scenario.goals.satisfaction,
-      goalWeeks: scenario.goals.weeks,
-      week: 1,
-      revenue: 0,
-      totalRevenue: 0,
-      isPaused: false,
-      eventHistory: [],
-      achievements: []
-    });
-    setShowScenarios(false);
-  };
-
-  useEffect(() => {
-if (gameState.isPaused || showEvent) return;
-
-    const interval = setInterval(() => {
-      setGameState(prev => {
-        const newState = { ...prev };
-        newState.week += 1;
-
-        // Calculate costs
-        const weeklyCosts = calculateWeeklyCosts(prev);
-        newState.budget -= weeklyCosts;
-
-        // Reader growth from touchpoints
-        let newReaders = 10; // Base organic growth
-        Object.keys(prev.touchpoints).forEach(key => {
-          if (prev.touchpoints[key].invested && touchpointData[key].readerBoost) {
-            newReaders += touchpointData[key].readerBoost;
-          }
-        });
-        newState.activeReaders = Math.max(0, prev.activeReaders + newReaders);
-
-        // Satisfaction changes
-        let satChange = -2; // Base decay
-        Object.keys(prev.touchpoints).forEach(key => {
-          if (prev.touchpoints[key].invested && touchpointData[key].satisfactionBoost) {
-            satChange += touchpointData[key].satisfactionBoost * 0.1;
-          }
-        });
-        newState.readerSat = Math.max(0, Math.min(100, prev.readerSat + satChange));
-
-        // Churn
-        let churnRate = 15;
-        Object.keys(prev.touchpoints).forEach(key => {
-          if (prev.touchpoints[key].invested && touchpointData[key].churnReduction) {
-            churnRate -= touchpointData[key].churnReduction * 0.5;
-          }
-        });
-        if (prev.readerSat > 70) churnRate -= 5;
-        if (prev.readerSat < 40) churnRate += 10;
-        newState.churn = Math.max(2, Math.min(30, churnRate));
-        
-        const churned = Math.floor(newState.activeReaders * (newState.churn / 100));
-        newState.activeReaders = Math.max(0, newState.activeReaders - churned);
-
-        // Revenue
-        let weeklyRevenue = 0;
-        if (prev.monetization.premiumContent.enabled) {
-          newState.premiumSubscribers = Math.floor(newState.activeReaders * 0.05);
-          weeklyRevenue += newState.premiumSubscribers * 25;
-        }
-        if (prev.monetization.enterpriseSupport.enabled) {
-          weeklyRevenue += prev.enterpriseClients * 5000;
-        }
-        if (prev.monetization.advertising.enabled) {
-          newState.adImpressions = newState.activeReaders * 10;
-          weeklyRevenue += Math.floor(newState.adImpressions * 0.05);
-          newState.readerSat = Math.max(0, newState.readerSat - 2);
-        }
-        if (prev.monetization.certificationFees.enabled) {
-          const newCerts = Math.floor(newState.activeReaders * 0.02);
-          newState.certifications += newCerts;
-          weeklyRevenue += newCerts * 200;
-        }
-        if (prev.monetization.sponsoredContent.enabled) {
-          weeklyRevenue += Math.floor(newState.activeReaders / 100) * 150;
-        }
-
-        newState.revenue = weeklyRevenue;
-        newState.totalRevenue += weeklyRevenue;
-
-        // Check for events - randomized, not tied to specific weeks
-        // 20% chance each week for chaos, 15% for opportunity
-        if (!prev.pendingEvent) {
-          const availableChaos = chaosEvents.filter(event => !prev.eventHistory.includes(event.id));
-          const availableOpportunities = opportunityEvents.filter(event => 
-            !prev.eventHistory.includes(event.id) &&
-            (!event.requires || prev.monetization[event.requires]?.enabled)
-          );
-          
-          let selectedEvent = null;
-          
-          // Roll for chaos event (20% chance)
-          if (Math.random() < 0.20 && availableChaos.length > 0) {
-            selectedEvent = availableChaos[Math.floor(Math.random() * availableChaos.length)];
-          }
-          // Roll for opportunity event (15% chance, only if no chaos)
-          else if (Math.random() < 0.15 && availableOpportunities.length > 0) {
-            selectedEvent = availableOpportunities[Math.floor(Math.random() * availableOpportunities.length)];
-          }
-          
-          if (selectedEvent) {
-            newState.pendingEvent = selectedEvent;
-            setShowEvent(true);
-          }
-        }
-
-        // Check achievements
-        const newAchievements = [];
-        if (newState.totalRevenue > 0 && !prev.achievements.includes('firstRevenue')) {
-          newAchievements.push('firstRevenue');
-        }
-        if (newState.totalRevenue >= prev.goalRevenue && !prev.monetization.advertising.enabled && !prev.achievements.includes('noAds')) {
-          newAchievements.push('noAds');
-        }
-        if (newState.enterpriseClients >= 3 && !prev.achievements.includes('enterprise')) {
-          newAchievements.push('enterprise');
-        }
-        if (newState.readerSat >= 95 && !prev.achievements.includes('perfectSat')) {
-          newAchievements.push('perfectSat');
-        }
-        if (newState.week <= 15 && newState.activeReaders >= prev.goalReaders && !prev.achievements.includes('fastWin')) {
-          newAchievements.push('fastWin');
-        }
-        if (newState.budget >= 200000 && newState.activeReaders >= prev.goalReaders && !prev.achievements.includes('budgetMaster')) {
-          newAchievements.push('budgetMaster');
-        }
-        const totalTeam = Object.values(newState.team).reduce((a, b) => a + b, 0);
-        if (totalTeam <= 5 && newState.activeReaders >= prev.goalReaders && !prev.achievements.includes('teamSmall')) {
-          newAchievements.push('teamSmall');
-        }
-        if (newState.premiumSubscribers >= 200 && !prev.achievements.includes('premium')) {
-          newAchievements.push('premium');
-        }
-        if (newState.certifications >= 100 && !prev.achievements.includes('certKing')) {
-          newAchievements.push('certKing');
-        }
-
-        if (newAchievements.length > 0) {
-          newState.achievements = [...prev.achievements, ...newAchievements];
-        }
-
-        // Check win/lose conditions
-        if (newState.activeReaders >= prev.goalReaders &&
-            newState.totalRevenue >= prev.goalRevenue &&
-            newState.readerSat >= prev.goalReaderSat) {
-          newState.isPaused = true;
-          setMessage({ type: 'success', text: `🎉 YOU WIN! Completed in ${newState.week} weeks!` });
-        }
-        if (newState.week >= prev.goalWeeks) {
-          newState.isPaused = true;
-          setMessage({ type: 'error', text: '⏰ Time\'s up! Goals not met.' });
-        }
-        if (newState.budget < -100000) {
-          newState.isPaused = true;
-          setMessage({ type: 'error', text: '💸 GAME OVER - Ran out of budget!' });
-        }
-
-        return newState;
-      });
-    }, gameSpeed);
-
-    return () => clearInterval(interval);
-}, [gameState.isPaused, gameSpeed, showEvent]);
-
-  useEffect(() => {
-    if (message) {
-      const timer = setTimeout(() => setMessage(null), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [message]);
-
-  if (showScenarios) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100 p-4 md:p-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-8">
-            <h1 className="text-4xl md:text-6xl font-bold mb-4 bg-gradient-to-r from-cyan-400 to-purple-500 text-transparent bg-clip-text">
-              Tech Writing Tycoon
-            </h1>
-            <p className="text-xl text-slate-300">
-              Build the best developer documentation on the internet
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {Object.entries(scenarios).map(([key, scenario]) => (
-              <div key={key} className="bg-slate-800 p-6 rounded-lg border-2 border-slate-700 hover:border-cyan-500 transition-all">
-                <div className="flex justify-between items-start mb-3">
-                  <h2 className="text-2xl font-bold">{scenario.name}</h2>
-                  <span className={`px-3 py-1 rounded text-sm font-semibold ${
-                    scenario.difficulty === 'Medium' ? 'bg-yellow-600' :
-                    scenario.difficulty === 'Hard' ? 'bg-orange-600' :
-                    scenario.difficulty === 'Nightmare' || scenario.difficulty === 'EXTREME' ? 'bg-red-600' :
-                    'bg-green-600'
-                  }`}>
-                    {scenario.difficulty}
-                  </span>
-                </div>
-                <p className="text-slate-300 mb-4">{scenario.description}</p>
-                <div className="space-y-2 mb-4">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Starting budget:</span>
-                    <span className="font-bold text-green-400">{formatCurrency(scenario.budget)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Reader goal:</span>
-                    <span className="font-bold text-cyan-400">{scenario.goals.readers} readers</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Revenue goal:</span>
-                    <span className="font-bold text-green-400">{formatCurrency(scenario.goals.revenue)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Time limit:</span>
-                    <span className="font-bold text-yellow-400">{scenario.goals.weeks} weeks</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => startScenario(key)}
-                  className="w-full bg-cyan-600 hover:bg-cyan-700 py-3 rounded-lg font-bold text-lg transition-colors"
-                >
-                  Start {scenario.name}
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+  } catch {
+    /* A fresh game also works when browser storage is unavailable. */
   }
+  return { game: createGame(), saved: false };
+}
+
+export default function App() {
+  const [initial] = useState(loadGame);
+  const [rawGame, setGame] = useState(initial.game);
+  const game = repairProjects(rawGame);
+  const [setup, setSetup] = useState(!initial.saved);
+  const [selected, setSelected] = useState(initial.game.scenario);
+  const [selectedDays, setSelectedDays] = useState(initial.game.goalDays || 90);
+  const [tab, setTab] = useState("content");
+  const [speed, setSpeed] = useState(8000);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [message, setMessage] = useState("");
+  const [storageFailed, setStorageFailed] = useState(false);
+  useEffect(() => {
+    setGame(repairProjects);
+  }, []);
+  useEffect(() => {
+    if (setup || game.isPaused || game.pendingEvent || game.outcome) return;
+    const timer = setInterval(
+      () => setGame((prev) => advanceWeek(prev)),
+      speed,
+    );
+    return () => clearInterval(timer);
+  }, [setup, game.isPaused, game.pendingEvent, game.outcome, speed]);
+  useEffect(() => {
+    if (setup) return;
+    try {
+      localStorage.setItem(saveKey, JSON.stringify({ version: 2, game }));
+    } catch {
+      setStorageFailed(true);
+    }
+  }, [game, setup]);
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(""), 4000);
+    return () => clearTimeout(timer);
+  }, [message]);
+  const scenario = scenarioPlan(selected, selectedDays);
+  const currentScenario = scenarioPlan(game.scenario, game.goalDays);
+  const costs = weeklyCosts(game);
+  const published = Object.values(game.touchpoints).filter(
+    (content) => content.invested,
+  ).length;
+  const income = game.revenue + game.weeklyFunding;
+  const disabled = Boolean(game.outcome || game.pendingEvent);
+  const buy = (type, key) => {
+    setGame((prev) => purchase(prev, type, key));
+  };
+  const resolve = (index) => setGame((prev) => resolveEvent(prev, index));
+  const nextWeek = () =>
+    setGame((prev) =>
+      advanceWeek({ ...prev, isPaused: true }, { manual: true }),
+    );
+  const start = (key = selected, days = selectedDays) => {
+    setGame(createGame(key, Date.now(), days));
+    setSetup(false);
+    setTab("content");
+    setFilter("all");
+    setQuery("");
+    setMessage("Pick a project and a weekly focus, then advance a week.");
+  };
+  const goalList = milestones(game);
+  const mission = currentScenario.objective;
+  const report = game.report;
+  const newlyEarned = report
+    ? game.activity
+        .filter(
+          (entry) =>
+            entry.week === report.week && entry.text.startsWith("Achievement:"),
+        )
+        .map((entry) => entry.text.replace("Achievement: ", ""))
+    : [];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100">
-      <div className="container mx-auto p-4 md:p-6 max-w-7xl">
-        <div className="mb-6">
-          <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-4">
-            <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 text-transparent bg-clip-text">
-              Tech Writing Tycoon
-            </h1>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setGameState(prev => ({ ...prev, isPaused: !prev.isPaused }))}
-                className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-700 px-4 md:px-6 py-2 md:py-3 rounded-lg font-semibold transition-colors"
-              >
-                {gameState.isPaused ? <><Play size={20} /> Start</> : <><Pause size={20} /> Pause</>}
-              </button>
-              <button
-                onClick={() => setShowMonetization(!showMonetization)}
-                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-4 md:px-6 py-2 md:py-3 rounded-lg font-semibold transition-colors"
-              >
-                <DollarSign size={20} /> Revenue
-              </button>
-              <button
-                onClick={() => setShowAchievements(!showAchievements)}
-                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 md:px-6 py-2 md:py-3 rounded-lg font-semibold transition-colors"
-              >
-                <Award size={20} /> {gameState.achievements.length}
-              </button>
-              <button
-                onClick={() => window.location.reload()}
-                className="bg-slate-700 hover:bg-slate-600 px-4 md:px-6 py-2 md:py-3 rounded-lg font-semibold transition-colors"
-              >
-                New Game
-              </button>
-            </div>
-          </div>
-
-          {message && (
-            <div className={`border-2 p-3 md:p-4 rounded-lg mb-4 ${
-              message.type === 'success' ? 'bg-green-900/50 border-green-500' :
-              message.type === 'error' ? 'bg-red-900/50 border-red-500' :
-              'bg-cyan-900/50 border-cyan-500'
-            }`}>
-              <p className="font-semibold text-center">{message.text}</p>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-            <div className="bg-slate-800 p-3 md:p-4 rounded-lg relative">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Clock size={20} className="text-yellow-400" />
-                  <div className="text-sm text-slate-400">Week</div>
-                </div>
-              </div>
-              <div className="text-2xl md:text-3xl font-bold">{gameState.week}</div>
-              <div className="text-xs text-slate-400">of {gameState.goalWeeks}</div>
-            </div>
-
-            <div className="bg-slate-800 p-3 md:p-4 rounded-lg relative">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <DollarSign size={20} className="text-green-400" />
-                  <div className="text-sm text-slate-400">Budget</div>
-                </div>
-                <button
-                  onMouseEnter={() => setHoveredTooltip('budget')}
-                  onMouseLeave={() => setHoveredTooltip(null)}
-                  className="text-slate-400 hover:text-cyan-400 transition-colors"
-                >
-                  <Info size={16} />
-                </button>
-              </div>
-              <div className={`text-2xl md:text-3xl font-bold ${gameState.budget < 0 ? 'text-red-400' : 'text-green-400'}`}>
-                {formatCurrency(gameState.budget)}
-              </div>
-              <div className="text-xs text-slate-400">{formatCurrency(calculateWeeklyCosts(gameState))}/wk</div>
-              {hoveredTooltip === 'budget' && (
-                <div className="absolute z-50 bg-slate-950 border-2 border-cyan-500 p-3 rounded-lg text-sm mt-2 left-0 right-0 shadow-xl">
-                  {metricTooltips.budget}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-slate-800 p-3 md:p-4 rounded-lg relative">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Users size={20} className="text-cyan-400" />
-                  <div className="text-sm text-slate-400">Readers</div>
-                </div>
-                <button
-                  onMouseEnter={() => setHoveredTooltip('activeReaders')}
-                  onMouseLeave={() => setHoveredTooltip(null)}
-                  className="text-slate-400 hover:text-cyan-400 transition-colors"
-                >
-                  <Info size={16} />
-                </button>
-              </div>
-              <div className="text-2xl md:text-3xl font-bold text-cyan-400">{gameState.activeReaders}</div>
-              <div className="text-xs text-slate-400">goal: {gameState.goalReaders}</div>
-              {hoveredTooltip === 'activeReaders' && (
-                <div className="absolute z-50 bg-slate-950 border-2 border-cyan-500 p-3 rounded-lg text-sm mt-2 left-0 right-0 shadow-xl">
-                  {metricTooltips.activeReaders}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-slate-800 p-3 md:p-4 rounded-lg relative">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <TrendingUp size={20} className="text-purple-400" />
-                  <div className="text-sm text-slate-400">Reader Sat</div>
-                </div>
-                <button
-                  onMouseEnter={() => setHoveredTooltip('readerSat')}
-                  onMouseLeave={() => setHoveredTooltip(null)}
-                  className="text-slate-400 hover:text-cyan-400 transition-colors"
-                >
-                  <Info size={16} />
-                </button>
-              </div>
-              <div className="text-2xl md:text-3xl font-bold text-purple-400">{Math.floor(gameState.readerSat)}%</div>
-              <div className="text-xs text-slate-400">goal: {gameState.goalReaderSat}%</div>
-              {hoveredTooltip === 'readerSat' && (
-                <div className="absolute z-50 bg-slate-950 border-2 border-cyan-500 p-3 rounded-lg text-sm mt-2 left-0 right-0 shadow-xl">
-                  {metricTooltips.readerSat}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-slate-800 p-3 md:p-4 rounded-lg relative">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <TrendingDown size={20} className="text-red-400" />
-                  <div className="text-sm text-slate-400">Churn</div>
-                </div>
-                <button
-                  onMouseEnter={() => setHoveredTooltip('churn')}
-                  onMouseLeave={() => setHoveredTooltip(null)}
-                  className="text-slate-400 hover:text-cyan-400 transition-colors"
-                >
-                  <Info size={16} />
-                </button>
-              </div>
-              <div className="text-2xl md:text-3xl font-bold text-red-400">{Math.floor(gameState.churn)}%</div>
-              <div className="text-xs text-slate-400">per week</div>
-              {hoveredTooltip === 'churn' && (
-                <div className="absolute z-50 bg-slate-950 border-2 border-cyan-500 p-3 rounded-lg text-sm mt-2 left-0 right-0 shadow-xl">
-                  {metricTooltips.churn}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-slate-800 p-3 md:p-4 rounded-lg relative" style={{ gridColumn: 'span 3' }}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <DollarSign size={20} className="text-green-400" />
-                  <div className="text-sm text-slate-400">Revenue</div>
-                </div>
-                <button
-                  onMouseEnter={() => setHoveredTooltip('totalRevenue')}
-                  onMouseLeave={() => setHoveredTooltip(null)}
-                  className="text-slate-400 hover:text-cyan-400 transition-colors"
-                >
-                  <Info size={16} />
-                </button>
-              </div>
-              <div className="text-2xl md:text-3xl font-bold text-green-400">{formatCurrency(gameState.revenue)}/wk</div>
-              <div className="text-xs text-slate-400">
-                total: {formatCurrency(gameState.totalRevenue)} / {formatCurrency(gameState.goalRevenue)}
-              </div>
-              {hoveredTooltip === 'totalRevenue' && (
-                <div className="absolute z-50 bg-slate-950 border-2 border-cyan-500 p-3 rounded-lg text-sm mt-2 left-0 right-0 shadow-xl">
-                  {metricTooltips.totalRevenue}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {showAchievements && (
-            <div className="bg-slate-800 p-4 md:p-6 rounded-lg mb-6">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <Award size={24} />
-                Achievements ({gameState.achievements.length}/{Object.keys(achievements).length})
-              </h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {Object.entries(achievements).map(([key, achievement]) => (
-                  <div
-                    key={key}
-                    className={`p-3 rounded-lg border-2 ${
-                      gameState.achievements.includes(key)
-                        ? 'bg-purple-900/30 border-purple-500'
-                        : 'bg-slate-700/30 border-slate-600 opacity-50'
-                    }`}
-                  >
-                    <div className="text-2xl mb-1">{achievement.icon}</div>
-                    <div className="font-semibold text-sm">{achievement.name}</div>
-                    <div className="text-xs text-slate-400">{achievement.description}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {showMonetization && (
-            <div className="bg-slate-800 p-4 md:p-6 rounded-lg mb-6">
-              <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <DollarSign size={24} />
-                Revenue streams
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {Object.entries(monetizationData).map(([key, strategy]) => (
-                  <div
-                    key={key}
-                    className={`p-4 rounded-lg ${
-                      gameState.monetization[key].enabled
-                        ? 'bg-green-900/30 border-2 border-green-600'
-                        : 'bg-slate-700'
-                    }`}
-                  >
-                    <div className="font-semibold mb-1">{strategy.name}</div>
-                    <div className="text-sm text-slate-400 mb-2">{strategy.description}</div>
-                    {!gameState.monetization[key].enabled && key !== 'freemium' && (
-                      <button
-                        onClick={() => enableMonetization(key)}
-                        className="w-full bg-green-600 hover:bg-green-700 py-2 rounded font-semibold transition-colors"
-                      >
-                        Enable ({formatCurrency(strategy.cost)})
-                      </button>
-                    )}
-                    {gameState.monetization[key].enabled && (
-                      <div className="flex items-center gap-2 text-green-400 text-sm">
-                        <CheckCircle size={16} />
-                        Active
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+    <div className="app">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-icon">
+            <BookOpen size={21} />
+          </span>
+          <span>
+            Tech Writing<span className="brand-sub">TYCOON</span>
+          </span>
         </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-slate-800 p-4 md:p-6 rounded-lg">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <BookOpen size={24} />
-              Content & touchpoints
-            </h2>
-            
-            <div className="space-y-3 max-h-[700px] overflow-y-auto pr-2" style={{ maxHeight: 'calc(100vh - 400px)' }}>
-              {Object.entries(touchpointData).map(([key, data]) => {
-                const tp = gameState.touchpoints[key];
-                
-                // Check if staff requirements are met
-                let staffRequirementsMet = true;
-                let missingStaff = [];
-                if (data.requires) {
-                  Object.keys(data.requires).forEach(role => {
-                    if (gameState.team[role] < data.requires[role]) {
-                      staffRequirementsMet = false;
-                      const roleLabel = teamRoles.find(r => r.key === role)?.label || role;
-                      missingStaff.push(`${data.requires[role]} ${roleLabel}`);
-                    }
-                  });
-                }
-                
-                return (
-                  <div key={key} className={`p-4 rounded-lg relative ${tp.invested ? 'bg-green-900/30 border-2 border-green-600' : 'bg-slate-700'}`}>
-                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-2">
-                      <div className="flex-1">
-                        <div className="font-semibold flex items-center gap-2">
-                          {tp.invested && <CheckCircle size={16} className="text-green-400" />}
-                          {data.name}
-                          <button
-                            onMouseEnter={() => setHoveredTooltip(key + '_tp')}
-                            onMouseLeave={() => setHoveredTooltip(null)}
-                            className="text-slate-400 hover:text-cyan-400 transition-colors"
-                          >
-                            <Info size={16} />
-                          </button>
+        <div className="nav-caption">YOUR WORKSPACE</div>
+        <nav>
+          {tabs.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              className={!setup && tab === key ? "nav-item active" : "nav-item"}
+              aria-current={!setup && tab === key ? "page" : undefined}
+              onClick={() => {
+                setTab(key);
+                setQuery("");
+              }}
+              disabled={setup}
+            >
+              {createElement(Icon, { size: 18 })}
+              {label}
+              {key === "achievements" && (
+                <span className="nav-count">{game.achievements.length}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <span className="version">
+            {storageFailed
+              ? "Progress is not saved in this browser."
+              : "Progress saves in this browser."}
+          </span>
+        </div>
+      </aside>
+      <main>
+        <header className="topbar">
+          <div className="breadcrumb">
+            Workspace <ChevronRight size={14} />
+            <span>{setup ? "New game" : clean(currentScenario.name)}</span>
+          </div>
+          <span className="topbar-note">
+            <span className="status-dot" />
+            {setup
+              ? "Choose a mission"
+              : game.isPaused || game.pendingEvent || game.outcome
+                ? "Paused"
+                : "Auto-playing"}
+          </span>
+        </header>
+        <div className="main-content">
+          {setup ? (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">
+                    FOUR TEAMS. FOUR DIFFERENT PROBLEMS.
+                  </div>
+                  <h1>
+                    Pick your challenge<span className="green">.</span>
+                  </h1>
+                  <p className="intro">
+                    Build useful docs, manage your team, and handle the
+                    occasional plot twist.
+                  </p>
+                </div>
+                {(game.week > 0 || game.activity.length > 0) && (
+                  <button className="secondary" onClick={() => setSetup(false)}>
+                    Return to game
+                  </button>
+                )}
+              </div>
+              <section
+                className="timeline-picker"
+                aria-labelledby="timeline-title"
+              >
+                <div>
+                  <h2 id="timeline-title">Choose your timeline</h2>
+                  <p>Budget and milestones adjust to the time available.</p>
+                </div>
+                <div className="timeline-options">
+                  {timelines.map((timeline) => (
+                    <button
+                      key={timeline.days}
+                      className={
+                        selectedDays === timeline.days ? "selected" : ""
+                      }
+                      aria-pressed={selectedDays === timeline.days}
+                      onClick={() => setSelectedDays(timeline.days)}
+                    >
+                      {timeline.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+              <div className="setup-heading">
+                <h2>Where do you want to start?</h2>
+                <span>Each mission has its own win conditions.</span>
+              </div>
+              <div className="scenario-grid">
+                {Object.keys(scenarios).map((key, index) => {
+                  const data = scenarioPlan(key, selectedDays);
+                  const Icon = scenarioIcons[index];
+                  return (
+                    <button
+                      key={key}
+                      className={`scenario-card ${selected === key ? "selected" : ""}`}
+                      onClick={() => setSelected(key)}
+                      aria-pressed={selected === key}
+                    >
+                      <div className="scenario-top">
+                        <span className={`scenario-icon tone-${index}`}>
+                          <Icon size={24} />
+                        </span>
+                        <span className={`difficulty level-${index}`}>
+                          {data.difficulty}
+                        </span>
+                      </div>
+                      <h3>{clean(data.name)}</h3>
+                      <p>{data.description}</p>
+                      <div className="scenario-stats">
+                        <div>
+                          <span>Team budget</span>
+                          <strong>{money(data.budget)}</strong>
                         </div>
-                        <div className="text-sm text-slate-400">{data.impact}</div>
-                        {data.requires && !tp.invested && (
-                          <div className="text-xs text-slate-400 mt-1">
-                            Requires: {Object.entries(data.requires).map(([role, count]) => {
-                              const roleLabel = teamRoles.find(r => r.key === role)?.label || role;
-                              const hasEnough = gameState.team[role] >= count;
-                              return (
-                                <span key={role} className={hasEnough ? 'text-green-400' : 'text-red-400'}>
-                                  {count} {roleLabel}
-                                  {Object.keys(data.requires).indexOf(role) < Object.keys(data.requires).length - 1 ? ', ' : ''}
-                                </span>
-                              );
-                            })}
-                          </div>
+                        <div>
+                          <span>Deadline</span>
+                          <strong>{data.goals.days} days</strong>
+                        </div>
+                        <div>
+                          <span>Starting readers</span>
+                          <strong>
+                            {data.startingReaders.toLocaleString()}
+                          </strong>
+                        </div>
+                      </div>
+                      <div className="scenario-choice">
+                        {selected === key ? (
+                          <>
+                            <Check size={16} /> Selected
+                          </>
+                        ) : (
+                          <>
+                            Choose mission <ArrowRight size={16} />
+                          </>
                         )}
                       </div>
-                      <div className="text-right">
-                        <div className="font-bold text-green-400">{formatCurrency(data.cost)}</div>
-                        <div className="text-xs text-slate-400">${data.maintenance * 100}/wk</div>
-                      </div>
-                    </div>
-                    
-                    {hoveredTooltip === key + '_tp' && (
-                      <div className="absolute z-50 bg-slate-950 border-2 border-cyan-500 p-3 rounded-lg text-sm mt-2 left-0 right-0 shadow-xl">
-                        {data.tooltip}
-                      </div>
-                    )}
-                    
-                    {!tp.invested && (
-                      <button
-                        onClick={() => investInTouchpoint(key)}
-                        disabled={!staffRequirementsMet}
-                        className={`w-full py-2 rounded mt-2 font-semibold transition-colors ${
-                          staffRequirementsMet 
-                            ? 'bg-cyan-600 hover:bg-cyan-700' 
-                            : 'bg-slate-600 cursor-not-allowed opacity-50'
-                        }`}
-                      >
-                        {staffRequirementsMet ? 'Create' : 'Need more staff'}
-                      </button>
-                    )}
-                    
-                    {tp.invested && (
-                      <div className="flex items-center gap-2 text-green-400 text-sm mt-2">
-                        <CheckCircle size={16} />
-                        Published
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="bg-slate-800 p-4 md:p-6 rounded-lg">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Users size={24} />
-              Your docs team
-            </h2>
-            
-            <div className="space-y-3">
-              {teamRoles.map(role => (
-                <div key={role.key} className="bg-slate-700 p-4 rounded-lg relative">
-                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-2">
-                    <div className="flex items-center gap-2">
-                      <div>
-                        <div className="font-semibold flex items-center gap-2">
-                          {role.label}
-                          <button
-                            onMouseEnter={() => setHoveredTooltip(role.key + '_team')}
-                            onMouseLeave={() => setHoveredTooltip(null)}
-                            className="text-slate-400 hover:text-purple-400 transition-colors"
-                          >
-                            <Info size={16} />
-                          </button>
-                        </div>
-                        <div className="text-sm text-slate-400">
-                          Count: {gameState.team[role.key]} | ${role.salary}/wk each
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-bold text-green-400">{formatCurrency(role.cost)}</div>
-                      <div className="text-xs text-slate-400">to hire</div>
-                    </div>
-                  </div>
-                  
-                  {hoveredTooltip === role.key + '_team' && (
-                    <div className="absolute z-50 bg-slate-950 border-2 border-purple-500 p-3 rounded-lg text-sm mt-2 left-0 right-0 shadow-xl">
-                      {role.tooltip}
-                    </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <section className="launch-panel">
+                <div>
+                  <span className="eyebrow">YOUR MISSION</span>
+                  <h2>{scenario.mission}</h2>
+                  {selected === "nightmare" && (
+                    <p>
+                      Essentials:{" "}
+                      {scenario.criticalContent
+                        .map((key) => touchpointData[key].name)
+                        .join(", ")}
+                      . This plan requires{" "}
+                      {Math.ceil(scenario.objective.target / 25)} of the 4.
+                    </p>
                   )}
-                  
-                  <button
-                    onClick={() => hireTeamMember(role.key)}
-                    className="w-full bg-purple-600 hover:bg-purple-700 py-2 rounded font-semibold transition-colors"
-                  >
-                    Hire +1
-                  </button>
+                  <p>
+                    {scenario.goals.readers.toLocaleString()} readers ·{" "}
+                    {scenario.objective.target}
+                    {scenario.objective.unit}{" "}
+                    {scenario.objective.label.toLowerCase()} ·{" "}
+                    {scenario.goals.satisfaction}% satisfaction
+                  </p>
+                  {selected === "opensource" && (
+                    <p>
+                      Includes {money(scenario.weeklyFunding)}/week in committed
+                      funding. No ads or premium paywalls.
+                    </p>
+                  )}
                 </div>
-              ))}
-            </div>
-            
-            <div className="mt-4 p-4 bg-slate-700 rounded-lg">
-              <div className="font-semibold mb-2">Weekly costs</div>
-              <div className="text-2xl font-bold text-red-400">
-                {formatCurrency(calculateWeeklyCosts(gameState))}/week
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {showEvent && gameState.pendingEvent && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 md:p-6 z-50">
-            <div className="bg-slate-800 rounded-lg p-6 md:p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center gap-3 mb-4">
-                <AlertCircle size={32} className="text-yellow-400" />
-                <h2 className="text-2xl font-bold">{gameState.pendingEvent.title}</h2>
-              </div>
-              
-              <p className="text-slate-300 mb-6 text-lg">
-                {gameState.pendingEvent.description}
-              </p>
-              
-              <div className="space-y-3">
-                {gameState.pendingEvent.options.map((option, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleEventChoice(option)}
-                    className="w-full p-4 rounded-lg text-left bg-slate-700 hover:bg-slate-600 transition-all"
-                  >
-                    <div className="font-semibold mb-1">{option.text}</div>
-                    <div className="text-sm text-slate-400">
-                      {Object.keys(option.effect).map(key => {
-                        if (key === 'budget') return `Budget: ${formatCurrency(option.effect[key])}`;
-                        if (key === 'revenue') return `Revenue: +${formatCurrency(option.effect[key])}`;
-                        if (key === 'readerSat') return `Reader sat: ${option.effect[key] > 0 ? '+' : ''}${option.effect[key]}%`;
-                        if (key === 'readers') return `${option.effect[key] > 0 ? '+' : ''}${option.effect[key]} readers`;
-                        if (key === 'enterpriseClients') return `+${option.effect[key]} enterprise client(s)`;
-                        return '';
-                      }).filter(Boolean).join(' • ')}
+                <button className="primary" onClick={() => start()}>
+                  Start mission <ArrowRight size={18} />
+                </button>
+              </section>
+              <div className="how-it-works">
+                {[
+                  [
+                    "01",
+                    "Assign a project",
+                    "Projects reserve staff and take 7–28 days to ship.",
+                  ],
+                  [
+                    "02",
+                    "Choose a focus",
+                    "Trade growth for quality, or invest in the community.",
+                  ],
+                  [
+                    "03",
+                    "Advance a week",
+                    "See what shipped, handle decisions, and adjust your plan.",
+                  ],
+                ].map(([number, title, text]) => (
+                  <div key={number}>
+                    <span>{number}</span>
+                    <div>
+                      <strong>{title}</strong>
+                      <p>{text}</p>
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
-            </div>
-          </div>
-        )}
-      </div>
+            </>
+          ) : (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">
+                    {clean(currentScenario.name).toUpperCase()} ·{" "}
+                    {game.goalDays - game.elapsedDays} DAYS LEFT ·{" "}
+                    {game.goalDays}-DAY PLAN
+                  </div>
+                  <h1>{currentScenario.mission}</h1>
+                  <p className="intro">{currentScenario.tip}</p>
+                </div>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setGame((prev) => ({ ...prev, isPaused: true }));
+                    setSelected(game.scenario);
+                    setSelectedDays(game.goalDays);
+                    setSetup(true);
+                  }}
+                >
+                  New game
+                </button>
+              </div>
+              <div className="simulation-bar">
+                <div>
+                  <span className="week-label">
+                    DAY{" "}
+                    <strong>
+                      {game.elapsedDays.toString().padStart(2, "0")}
+                    </strong>
+                    <span>/ {game.goalDays}</span>
+                  </span>
+                  <span className="simulation-hint">
+                    {game.outcome
+                      ? "Mission finished"
+                      : game.isPaused
+                        ? "Plan your next move"
+                        : "Time advances automatically"}
+                  </span>
+                </div>
+                <div className="play-controls">
+                  <label className="speed">
+                    Speed
+                    <select
+                      aria-label="Simulation speed"
+                      value={speed}
+                      onChange={(e) => setSpeed(Number(e.target.value))}
+                    >
+                      <option value={12000}>Slow</option>
+                      <option value={8000}>Normal</option>
+                      <option value={4000}>Fast</option>
+                    </select>
+                  </label>
+                  <button
+                    className="secondary compact"
+                    disabled={disabled}
+                    onClick={() =>
+                      setGame((prev) => ({ ...prev, isPaused: !prev.isPaused }))
+                    }
+                  >
+                    {game.isPaused ? <Play size={16} /> : <Pause size={16} />}
+                    {game.isPaused ? "Auto-play" : "Pause"}
+                  </button>
+                  <button
+                    className="primary compact"
+                    disabled={disabled}
+                    onClick={nextWeek}
+                  >
+                    Advance {Math.min(7, game.goalDays - game.elapsedDays)} days{" "}
+                    <SkipForward size={16} />
+                  </button>
+                </div>
+              </div>
+              {game.outcome && (
+                <div className="outcome" role="status">
+                  <Award size={25} />
+                  <div>
+                    <strong>
+                      {game.outcome === "won"
+                        ? `Mission complete in ${game.elapsedDays} days!`
+                        : game.outcome === "timeout"
+                          ? "Deadline reached. Here’s where you landed."
+                          : "The team budget ran out."}
+                    </strong>
+                    <p>
+                      {game.outcome === "won"
+                        ? `${game.achievements.length} achievements · ${money(game.budget)} remaining.`
+                        : `${goalList.filter((goal) => goal.value >= goal.target).length} of 3 milestones reached. Try another focus or project order.`}
+                    </p>
+                  </div>
+                  <button
+                    className="secondary"
+                    onClick={() => start(game.scenario, game.goalDays)}
+                  >
+                    Replay mission
+                  </button>
+                </div>
+              )}
+              <div className="metrics">
+                {[
+                  [
+                    "Team budget",
+                    money(game.budget),
+                    `${money(costs)} weekly costs`,
+                    Wallet,
+                  ],
+                  [
+                    "Active readers",
+                    game.activeReaders.toLocaleString(),
+                    `${Math.round(game.churn)}% weekly reader drop-off`,
+                    Users,
+                  ],
+                  [
+                    "Reader satisfaction",
+                    `${Math.floor(game.readerSat)}%`,
+                    `Goal: ${game.goalReaderSat}%`,
+                    Leaf,
+                  ],
+                  [
+                    mission.label,
+                    `${Math.floor(game[mission.key])}${mission.unit}`,
+                    `Goal: ${mission.target}${mission.unit}`,
+                    Award,
+                  ],
+                ].map(([label, value, hint, Icon]) => (
+                  <div className="metric" key={label}>
+                    <div>
+                      <span>{label}</span>
+                      {createElement(Icon, { size: 18 })}
+                    </div>
+                    <strong>{value}</strong>
+                    <small>{hint}</small>
+                  </div>
+                ))}
+              </div>
+              {game.scenario === "nightmare" && (
+                <LaunchEssentials
+                  game={game}
+                  buy={buy}
+                  showEssentials={() => {
+                    setTab("content");
+                    setFilter("essentials");
+                    setQuery("");
+                    document
+                      .getElementById("content-library")
+                      ?.scrollIntoView({ block: "start" });
+                  }}
+                  showTeam={() => {
+                    setTab("team");
+                    document
+                      .getElementById("content-library")
+                      ?.scrollIntoView({ block: "start" });
+                  }}
+                />
+              )}
+              <SupportPanel
+                game={game}
+                showSupport={() => {
+                  setTab("content");
+                  setFilter("support");
+                  setQuery("");
+                  document.getElementById("content-library")?.scrollIntoView({
+                    behavior: window.matchMedia(
+                      "(prefers-reduced-motion: reduce)",
+                    ).matches
+                      ? "auto"
+                      : "smooth",
+                    block: "start",
+                  });
+                }}
+              />
+              <section className="weekly-focus">
+                <div>
+                  <h2>This week’s focus</h2>
+                  <p>
+                    Affects your next week. Project build times stay the same.
+                  </p>
+                </div>
+                <div className="focus-options">
+                  {Object.entries(weeklyFocuses).map(([key, focus]) => (
+                    <button
+                      key={key}
+                      className={
+                        game.focus === key
+                          ? "focus-option selected"
+                          : "focus-option"
+                      }
+                      aria-pressed={game.focus === key}
+                      disabled={disabled}
+                      onClick={() =>
+                        setGame((prev) => ({ ...prev, focus: key }))
+                      }
+                    >
+                      <strong>
+                        {focus.label}
+                        {game.focus === key && <Check size={16} />}
+                      </strong>
+                      <span>{focus.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+              {report && (
+                <section className="week-report" aria-live="polite">
+                  <div className="report-heading">
+                    <h2>
+                      Day{" "}
+                      {report.elapsedDays ??
+                        Math.min(report.week * 7, game.goalDays)}{" "}
+                      report
+                    </h2>
+                    <span>
+                      {report.completed.length
+                        ? `${report.completed.length} shipped`
+                        : "Work in progress"}
+                    </span>
+                  </div>
+                  <div className="report-numbers">
+                    <span>
+                      <strong>{signed(report.readerDelta)}</strong> readers
+                    </span>
+                    <span>
+                      <strong>
+                        {signed(Number(report.satisfactionDelta.toFixed(1)))}
+                      </strong>{" "}
+                      satisfaction points
+                    </span>
+                    <span>
+                      <strong>
+                        {report.cashDelta > 0 ? "+" : ""}
+                        {money(report.cashDelta)}
+                      </strong>{" "}
+                      net cash
+                    </span>
+                  </div>
+                  {report.support && (
+                    <p className="shipped">
+                      <Check size={17} />
+                      Estimated support requests: {report.support.avoided}{" "}
+                      avoided, {report.support.remaining} remaining during these{" "}
+                      {report.turnDays} days.
+                    </p>
+                  )}
+                  {report.completed.length > 0 && (
+                    <p className="shipped">
+                      <Check size={17} />
+                      Shipped:{" "}
+                      {report.completed
+                        .map((key) => touchpointData[key].name)
+                        .join(", ")}
+                    </p>
+                  )}
+                  {newlyEarned.length > 0 && (
+                    <p className="shipped">
+                      <Award size={17} />
+                      Unlocked: {newlyEarned.join(" · ")}
+                    </p>
+                  )}
+                </section>
+              )}
+              {game.projects.length > 0 && (
+                <section className="project-board">
+                  <div className="report-heading">
+                    <h2>
+                      <Clock size={18} /> On the workbench
+                    </h2>
+                    <span>
+                      {game.projects.length}/{projectCapacity(game)} project
+                      slots
+                    </span>
+                  </div>
+                  <div className="project-cards">
+                    {game.projects.map((project) => (
+                      <div className="project-card" key={project.key}>
+                        <strong>{touchpointData[project.key].name}</strong>
+                        <progress
+                          aria-label={`${touchpointData[project.key].name} progress`}
+                          value={project.duration - project.remaining}
+                          max={project.duration}
+                        />
+                        <span>
+                          {Math.ceil(project.remaining * 7)} days left
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p>
+                    Assigned staff are reserved until a project ships. Event
+                    delays apply to active projects.
+                  </p>
+                </section>
+              )}
+              <div className="workspace-grid">
+                <section className="library" id="content-library">
+                  <div className="section-heading">
+                    <div>
+                      <h2>{tabs.find((item) => item.key === tab).label}</h2>
+                      <p>
+                        {tab === "content"
+                          ? "Start a project. Benefits begin when it ships."
+                          : tab === "team"
+                            ? "More available staff means more work can run in parallel."
+                            : tab === "agents"
+                              ? "Help agents find answers, use APIs, and recover from errors."
+                              : tab === "revenue"
+                                ? "Optional income to extend your runway. Sales aren’t a win condition."
+                                : "Milestones earned through your decisions."}
+                      </p>
+                    </div>
+                    <span className="pill">
+                      {tab === "content"
+                        ? `${published} live · ${game.projects.length}/${projectCapacity(game)} building`
+                        : tab === "agents"
+                          ? `${agentReadiness(game)}/100 readiness`
+                          : tab === "team"
+                            ? `${Object.values(game.team).reduce((a, b) => a + b, 0)} people`
+                            : tab === "achievements"
+                              ? `${game.achievements.length}/${Object.keys(achievements).length} unlocked`
+                              : `${money(game.revenue)}/week earned`}
+                    </span>
+                  </div>
+                  {tab === "content" && (
+                    <ContentLibrary
+                      game={game}
+                      query={query}
+                      setQuery={setQuery}
+                      filter={filter}
+                      setFilter={setFilter}
+                      buy={buy}
+                    />
+                  )}
+                  {tab === "agents" && <AgentPanel game={game} buy={buy} />}
+                  {tab === "team" && <TeamPanel game={game} buy={buy} />}
+                  {tab === "revenue" && <RevenuePanel game={game} buy={buy} />}
+                  {tab === "achievements" && <AchievementsPanel game={game} />}
+                </section>
+                <aside className="right-column">
+                  <section className="goals-panel">
+                    <span className="eyebrow">WIN CONDITIONS</span>
+                    <h2>Mission milestones</h2>
+                    <p>
+                      Reach all three by day {game.goalDays} and stay within
+                      budget.
+                    </p>
+                    {goalList.map((goal) => (
+                      <div className="goal" key={goal.key}>
+                        <div>
+                          <span>
+                            {goal.value >= goal.target && <Check size={14} />}{" "}
+                            {goal.label}
+                          </span>
+                          <strong>
+                            {goal.value.toLocaleString()}
+                            {goal.unit}
+                            <small>
+                              {" "}
+                              / {goal.target.toLocaleString()}
+                              {goal.unit}
+                            </small>
+                          </strong>
+                        </div>
+                        <progress
+                          aria-label={goal.label}
+                          value={Math.min(goal.value, goal.target)}
+                          max={goal.target}
+                        />
+                      </div>
+                    ))}
+                  </section>
+                  <section className="runway cash-panel">
+                    <h3>Weekly cash flow</h3>
+                    <div>
+                      <span>Earned income</span>
+                      <strong>{money(game.revenue)}</strong>
+                    </div>
+                    {game.weeklyFunding > 0 && (
+                      <div>
+                        <span>Committed funding</span>
+                        <strong>{money(game.weeklyFunding)}</strong>
+                      </div>
+                    )}
+                    <div>
+                      <span>Team + maintenance</span>
+                      <strong>−{money(costs)}</strong>
+                    </div>
+                    <div className="net-cash">
+                      <span>Net per week</span>
+                      <strong>{money(income - costs)}</strong>
+                    </div>
+                    <p>
+                      Cash runway:{" "}
+                      {costs <= income
+                        ? "self-sustaining"
+                        : `${Math.max(0, Math.floor((7 * game.budget) / (costs - income)))} days`}{" "}
+                      at current costs.
+                    </p>
+                  </section>
+                  <section className="activity-panel">
+                    <h3>Recent activity</h3>
+                    {game.activity.length === 0 ? (
+                      <p>Your first project starts the log.</p>
+                    ) : (
+                      <ol>
+                        {game.activity.slice(0, 6).map((entry, index) => (
+                          <li key={`${entry.week}-${index}`}>
+                            <span>
+                              D{Math.min(entry.week * 7, game.goalDays)}
+                            </span>
+                            {entry.text}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </section>
+                </aside>
+              </div>
+            </>
+          )}
+        </div>
+      </main>
+      {message && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {message}
+          <button
+            aria-label="Dismiss notification"
+            onClick={() => setMessage("")}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+      {game.pendingEvent && !setup && (
+        <EventDialog game={game} resolve={resolve} />
+      )}
     </div>
   );
-};
-
-export default DocsResourcesTycoon;
+}
