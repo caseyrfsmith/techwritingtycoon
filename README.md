@@ -1,16 +1,32 @@
-# React + Vite
+# Tech Writing Tycoon
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A documentation team strategy game built with React and Vite.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```sh
+npm ci
+npm run dev
+```
 
-## React Compiler
+## Play
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Choose Startup, Enterprise, Open source, or Launch rescue and a 30-, 60-, 90-, 180-, or 365-day timeline. Budgets and mission targets scale with the selected plan.
 
-## Expanding the ESLint configuration
+Assign available staff to projects, choose a focus, then advance up to seven days. Projects take 7–28 days; their benefits start when they ship. Auto-play is optional. Events pause time until you decide.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Win by reaching the reader, satisfaction, and scenario-specific milestones within budget. Revenue is optional; any earned income unlocks First dollar. Funding and earnings are tracked separately.
+
+Agent experience projects cover Markdown docs, llms.txt, OpenAPI, MCP, and task testing. Readiness is a simulated game score, with specification links in the app. It is not a measurement of a real website.
+
+Progress saves locally in the browser. Returning to a saved game pauses auto-play.
+
+## Checks
+
+```sh
+npm test
+npm run lint
+npm run build
+```
+
+`src/gameEngine.js` owns simulation rules, purchases, project scheduling, save repair, and event resolution. `src/gameData.js` defines scenarios and costs; these are gameplay assumptions rather than industry benchmarks.
